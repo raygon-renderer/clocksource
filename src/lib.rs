@@ -61,7 +61,7 @@ extern crate winapi;
 #[cfg(any(target_os = "macos", target_os = "ops"))]
 extern crate mach;
 
-#[derive(Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Clocksource {
     ref_id: Clock,
     ref_t0: u64,
@@ -73,22 +73,24 @@ pub struct Clocksource {
 
 const ONE_GHZ: f64 = 1_000_000_000.0;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Clock {
+    Counter,
     Monotonic,
     Realtime,
-    Counter,
 }
 
+#[inline(always)]
 fn read(clock: &Clock) -> u64 {
     match *clock {
+        Clock::Counter => rdtsc(),
         Clock::Monotonic => get_precise_ns(),
         Clock::Realtime => get_unix_time(),
-        Clock::Counter => rdtsc(),
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
+#[inline(always)]
 fn get_unix_time() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -101,12 +103,15 @@ fn get_unix_time() -> u64 {
 }
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
+#[inline(always)]
 fn get_precise_ns() -> u64 {
     use mach::mach_time::{mach_absolute_time, mach_timebase_info};
     unsafe {
         let time = mach_absolute_time();
         let info = {
             static mut INFO: mach_timebase_info = mach_timebase_info { numer: 0, denom: 0 };
+
+            // TODO: Replace with parking_lot::Once
             static ONCE: std::sync::Once = std::sync::ONCE_INIT;
 
             ONCE.call_once(|| { mach_timebase_info(&mut INFO); });
@@ -117,21 +122,23 @@ fn get_precise_ns() -> u64 {
 }
 
 #[cfg(target_os = "windows")]
+#[inline(always)]
 fn get_unix_time() -> u64 {
     use std::mem;
     use winapi::um::sysinfoapi;
     use winapi::shared::minwindef::FILETIME;
     const OFFSET: u64 = 116_444_736_000_000_000; //1jan1601 to 1jan1970
     let mut file_time = unsafe {
-        let mut file_time = mem::uninitialized();
-        sysinfoapi::GetSystemTimePreciseAsFileTime(&mut file_time);
-        (mem::transmute::<FILETIME, i64>(file_time)) as u64
+        let mut file_time = mem::MaybeUninit::uninit();
+        sysinfoapi::GetSystemTimePreciseAsFileTime(file_time.as_mut_ptr());
+        (mem::transmute::<FILETIME, i64>(file_time.assume_init())) as u64
     };
     file_time -= OFFSET;
     file_time * 100
 }
 
 #[cfg(target_os = "windows")]
+#[inline(always)]
 fn get_precise_ns() -> u64 {
     use std::mem;
     use winapi::um::winnt::LARGE_INTEGER;
@@ -139,20 +146,20 @@ fn get_precise_ns() -> u64 {
     lazy_static! {
         static ref PRF_FREQUENCY: u64 = {
             unsafe {
-                let mut frq = mem::uninitialized();
-                let res = profileapi::QueryPerformanceFrequency(&mut frq);
+                let mut frq = mem::MaybeUninit::uninit();
+                let res = profileapi::QueryPerformanceFrequency(frq.as_mut_ptr());
                 debug_assert_ne!(res, 0, "Failed to query performance frequency, {}", res);
-                let frq = *frq.QuadPart() as u64;
+                let frq = *frq.assume_init().QuadPart() as u64;
                 frq
             }
         };
     }
     let cnt = unsafe {
-        let mut cnt = mem::uninitialized();
+        let mut cnt = mem::MaybeUninit::uninit();
         debug_assert_eq!(mem::align_of::<LARGE_INTEGER>(), 8);
-        let res = profileapi::QueryPerformanceCounter(&mut cnt);
+        let res = profileapi::QueryPerformanceCounter(cnt.as_mut_ptr());
         debug_assert_ne!(res, 0, "Failed to query performance counter {}", res);
-        *cnt.QuadPart() as u64
+        *cnt.assume_init().QuadPart() as u64
     };
 
     let cnt = cnt as f64 / (*PRF_FREQUENCY as f64 / 1_000_000_000_f64);
@@ -160,6 +167,7 @@ fn get_precise_ns() -> u64 {
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "ios"), unix))]
+#[inline(always)]
 fn get_unix_time() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -172,6 +180,7 @@ fn get_unix_time() -> u64 {
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "ios"), unix))]
+#[inline(always)]
 fn get_precise_ns() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -188,6 +197,7 @@ fn get_precise_ns() -> u64 {
 extern crate lazy_static;
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "windows"), not(unix)))]
+#[inline(always)]
 fn get_unix_time() -> u64 {
     use std::time::SystemTime;
     match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
@@ -197,6 +207,7 @@ fn get_unix_time() -> u64 {
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "windows"), not(unix)))]
+#[inline(always)]
 fn get_precise_ns() -> u64 {
     use std::time::Instant;
     lazy_static! {
@@ -209,6 +220,7 @@ fn get_precise_ns() -> u64 {
 
 #[cfg(feature = "rdtsc")]
 #[allow(unused_mut)]
+#[inline(always)]
 fn rdtsc() -> u64 {
     let mut l: u32;
     let mut m: u32;
@@ -224,6 +236,7 @@ fn rdtsc() -> u64 {
 }
 
 impl Default for Clocksource {
+    #[inline]
     fn default() -> Clocksource {
         if cfg!(feature = "rdtsc") {
             Clocksource::configured(Clock::Monotonic, Clock::Counter)
@@ -235,6 +248,7 @@ impl Default for Clocksource {
 
 impl Clocksource {
     /// create a new clocksource
+    #[inline]
     pub fn new() -> Clocksource {
         Default::default()
     }
@@ -254,21 +268,25 @@ impl Clocksource {
     }
 
     /// get the approximate frequency of the source clock in Hz
+    #[inline(always)]
     pub fn frequency(&self) -> f64 {
         self.src_hz
     }
 
     /// get the raw counter reading of the source clock
+    #[inline(always)]
     pub fn counter(&self) -> u64 {
         read(&self.src_id)
     }
 
     /// get nanoseconds from the reference clock
+    #[inline(always)]
     pub fn reference(&self) -> u64 {
         read(&self.ref_id)
     }
 
     /// get the nanoseconds from the source clock
+    #[inline(always)]
     pub fn time(&self) -> u64 {
         let raw = self.counter();
         if self.src_id != self.ref_id {
@@ -324,6 +342,7 @@ impl Clocksource {
     }
 
     /// converts a raw reading to approximation of reference in nanoseconds
+    #[inline(always)]
     pub fn convert(&self, src_t1: u64) -> f64 {
         if self.src_id != self.ref_id {
             (self.ref_hz * ((src_t1 - self.src_t0) as f64 / self.src_hz)) + self.ref_t0 as f64
