@@ -112,9 +112,11 @@ fn get_precise_ns() -> u64 {
             static mut INFO: mach_timebase_info = mach_timebase_info { numer: 0, denom: 0 };
 
             // TODO: Replace with parking_lot::Once
-            static ONCE: std::sync::Once = std::sync::ONCE_INIT;
+            static ONCE: std::sync::Once = std::sync::Once::new();
 
-            ONCE.call_once(|| { mach_timebase_info(&mut INFO); });
+            ONCE.call_once(|| {
+                mach_timebase_info(&mut INFO);
+            });
             &INFO
         };
         time * info.numer as u64 / info.denom as u64
@@ -125,8 +127,8 @@ fn get_precise_ns() -> u64 {
 #[inline(always)]
 fn get_unix_time() -> u64 {
     use std::mem;
-    use winapi::um::sysinfoapi;
     use winapi::shared::minwindef::FILETIME;
+    use winapi::um::sysinfoapi;
     const OFFSET: u64 = 116_444_736_000_000_000; //1jan1601 to 1jan1970
     let mut file_time = unsafe {
         let mut file_time = mem::MaybeUninit::uninit();
@@ -141,8 +143,8 @@ fn get_unix_time() -> u64 {
 #[inline(always)]
 fn get_precise_ns() -> u64 {
     use std::mem;
-    use winapi::um::winnt::LARGE_INTEGER;
     use winapi::um::profileapi;
+    use winapi::um::winnt::LARGE_INTEGER;
     lazy_static! {
         static ref PRF_FREQUENCY: u64 = {
             unsafe {
@@ -192,11 +194,21 @@ fn get_precise_ns() -> u64 {
     (ts.tv_sec as u64) * 1_000_000_000 + (ts.tv_nsec as u64)
 }
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "windows"), not(unix)))]
+#[cfg(all(
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "windows"),
+    not(unix)
+))]
 #[macro_use]
 extern crate lazy_static;
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "windows"), not(unix)))]
+#[cfg(all(
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "windows"),
+    not(unix)
+))]
 #[inline(always)]
 fn get_unix_time() -> u64 {
     use std::time::SystemTime;
@@ -206,14 +218,17 @@ fn get_unix_time() -> u64 {
     }
 }
 
-#[cfg(all(not(target_os = "macos"), not(target_os = "ios"), not(target_os = "windows"), not(unix)))]
+#[cfg(all(
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "windows"),
+    not(unix)
+))]
 #[inline(always)]
 fn get_precise_ns() -> u64 {
     use std::time::Instant;
     lazy_static! {
-        static ref START: Instant = {
-            Instant::now()
-        };
+        static ref START: Instant = { Instant::now() };
     }
     START.elapsed().as_nanos() as u64
 }
