@@ -48,7 +48,7 @@
 //! let phase_error = clocksource.phase_error();
 //! ```
 
-#![cfg_attr(feature = "rdtsc", feature(asm))]
+#![cfg_attr(feature = "rdtsc", feature(llvm_asm))]
 #![deny(warnings)]
 
 extern crate libc;
@@ -240,7 +240,7 @@ fn rdtsc() -> u64 {
     let mut l: u32;
     let mut m: u32;
     unsafe {
-        asm!("lfence; rdtsc" : "={eax}" (l), "={edx}" (m) ::: "volatile");
+        llvm_asm!("lfence; rdtsc" : "={eax}" (l), "={edx}" (m) ::: "volatile");
     }
     ((m as u64) << 32) | (l as u64)
 }
