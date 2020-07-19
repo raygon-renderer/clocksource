@@ -164,7 +164,13 @@ fn get_precise_ns() -> u64 {
         *cnt.assume_init().QuadPart() as u64
     };
 
-    let cnt = cnt as f64 / (*PRF_FREQUENCY as f64 / 1_000_000_000_f64);
+    // Force cnt to be monotonic
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static MONOTONIC_CNT: AtomicU64 = AtomicU64::new(0);
+
+    let cnt = MONOTONIC_CNT.fetch_max(cnt, Ordering::SeqCst) as f64
+        / (*PRF_FREQUENCY as f64 / 1_000_000_000_f64);
+
     cnt as u64
 }
 
